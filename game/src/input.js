@@ -1,53 +1,74 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+const MOVEMENT = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight']);
+const PREVENT_DEFAULT = new Set([...MOVEMENT, 'Space']);
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+/** Keyboard holds and one-frame presses, plus pointer state in canvas CSS pixels. */
+export function createInput(canvas) {
+  const held = new Set();
+  const pressed = new Set();
+  let framePressed = new Set();
+  const pointer = { x: 0, y: 0, buttons: 0, moved: false };
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+  function onKeyDown(event) {
+    if (PREVENT_DEFAULT.has(event.code)) event.preventDefault();
+    if (!held.has(event.code)) pressed.add(event.code);
+    held.add(event.code);
+  }
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
+  function onKeyUp(event) {
+    held.delete(event.code);
+  }
 
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
+  function onPointerMove(event) {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = event.clientX - rect.left;
+    pointer.y = event.clientY - rect.top;
+    pointer.moved = true;
+  }
+
+  function clear() {
+    held.clear();
+    pressed.clear();
+    framePressed.clear();
+    pointer.buttons = 0;
+  }
+
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', clear);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerdown', (event) => {
+    onPointerMove(event);
+    pointer.buttons |= 1 << event.button;
+    if (event.button === 0) pressed.add('PointerPrimary');
+    if (event.button === 2) pressed.add('PointerSecondary');
+    canvas.setPointerCapture?.(event.pointerId);
   });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
+  canvas.addEventListener('pointerup', (event) => {
+    pointer.buttons &= ~(1 << event.button);
   });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
-  });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
-  });
+  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 
   return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
+    isDown(code) { return held.has(code); },
+    wasPressed(code) { return framePressed.has(code) || pressed.has(code); },
+    takePresses() {
+      framePressed = new Set(pressed);
+      pressed.clear();
+      return framePressed;
     },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
+    consumePress(code) {
+      const hadPress = framePressed.has(code) || pressed.has(code);
+      framePressed.delete(code);
+      pressed.delete(code);
+      return hadPress;
     },
+    movement() {
+      const x = (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0)
+        - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
+      const y = (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0)
+        - (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0);
+      return { x, y };
+    },
+    pointer,
   };
 }

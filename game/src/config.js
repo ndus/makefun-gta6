@@ -1,61 +1,67 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
-
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
-
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
 export const STEP = 1 / 60;
+export const MAX_FRAME = 0.25;
+
+export const CITY = {
+  width: 4200,
+  height: 3300,
+  waterWidth: 330,
+  roadWidth: 112,
+  sidewalkWidth: 34,
+  avenueX: [560, 1160, 1760, 2360, 2960, 3560],
+  avenueY: [420, 960, 1500, 2040, 2580, 3120],
+  seed: 1,
+};
 
 export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
+  radius: 14,
+  walkSpeed: 190,
+  sprintMultiplier: 1.55,
+  health: 100,
+  gunRange: 420,
+  gunCooldown: 0.34,
 };
 
-export const LIVES = 3;
-
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
+export const VEHICLE = {
+  enterRange: 58,
+  maxSpeed: 390,
+  reverseSpeed: 115,
+  acceleration: 230,
+  braking: 410,
+  steering: 2.45,
+  radius: 24,
 };
 
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
+export const FONT = 'Inter, ui-sans-serif, system-ui, sans-serif';
+
+export const COLORS = {
+  water: '#122e48',
+  waterGlow: '#1e8ba2',
+  ground: '#292b35',
+  road: '#252831',
+  roadLine: '#c9a957',
+  sidewalk: '#65616a',
+  player: '#e9d7c9',
+  neonPink: '#ff59cd',
+  neonBlue: '#47e7ef',
 };
 
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
+/** Small mulberry32-style generator; a scene can be recreated from the same integer seed. */
+export function createRandom(seed) {
+  let value = seed >>> 0;
+  return function random() {
+    value = (value + 0x6d2b79f5) | 0;
+    let mixed = Math.imul(value ^ (value >>> 15), 1 | value);
+    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
-
-export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
-  text: '#eef1f5',
-  muted: '#8b93a3',
-};
-
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
+/** Use an explicit URL seed when present; otherwise make one stable for this browser session. */
+export function makeRunSeed(search = window.location.search) {
+  const requested = new URLSearchParams(search).get('seed');
+  if (requested !== null && requested.trim() !== '') {
+    const parsed = Number(requested);
+    if (Number.isFinite(parsed)) return (Math.trunc(parsed) >>> 0);
+  }
+  return (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+}
