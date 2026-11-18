@@ -1,14 +1,15 @@
+// The simulation advances in fixed ticks and caps time accumulated in a single frame.
 export const STEP = 1 / 60;
 export const MAX_FRAME = 0.25;
 
 export const CITY = {
-  width: 4200,
-  height: 3300,
+  width: 4_200,
+  height: 3_300,
   waterWidth: 330,
   roadWidth: 112,
   sidewalkWidth: 34,
-  avenueX: [560, 1160, 1760, 2360, 2960, 3560],
-  avenueY: [420, 960, 1500, 2040, 2580, 3120],
+  avenueX: Array.from({ length: 6 }, (_, column) => 560 + column * 600),
+  avenueY: Array.from({ length: 6 }, (_, row) => 420 + row * 540),
   seed: 1,
 };
 
@@ -18,7 +19,7 @@ export const PLAYER = {
   sprintMultiplier: 1.55,
   health: 100,
   gunRange: 420,
-  gunCooldown: 0.34,
+  gunCooldown: 340 / 1000,
 };
 
 export const VEHICLE = {
@@ -31,37 +32,33 @@ export const VEHICLE = {
   radius: 24,
 };
 
-export const FONT = 'Inter, ui-sans-serif, system-ui, sans-serif';
+export const FONT = ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'].join(', ');
 
+// Shared palette for the street grid, waterfront and characters.
 export const COLORS = {
-  water: '#122e48',
-  waterGlow: '#1e8ba2',
-  ground: '#292b35',
-  road: '#252831',
-  roadLine: '#c9a957',
-  sidewalk: '#65616a',
-  player: '#e9d7c9',
-  neonPink: '#ff59cd',
-  neonBlue: '#47e7ef',
+  water: '#122e48', waterGlow: '#1e8ba2',
+  ground: '#292b35', road: '#252831', roadLine: '#c9a957',
+  sidewalk: '#65616a', player: '#e9d7c9',
+  neonPink: '#ff59cd', neonBlue: '#47e7ef',
 };
 
-/** Small mulberry32-style generator; a scene can be recreated from the same integer seed. */
 export function createRandom(seed) {
-  let value = seed >>> 0;
+  let state = seed >>> 0;
+  // Mix each new 32-bit state before scaling it to the unit interval.
   return function random() {
-    value = (value + 0x6d2b79f5) | 0;
-    let mixed = Math.imul(value ^ (value >>> 15), 1 | value);
-    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
-    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+    state = (state + 0x6d2b79f5) | 0;
+    const first = Math.imul(state ^ (state >>> 15), state | 1);
+    const second = first ^ (first + Math.imul(first ^ (first >>> 7), first | 61));
+    return ((second ^ (second >>> 14)) >>> 0) / 2 ** 32;
   };
 }
 
-/** Use an explicit URL seed when present; otherwise make one stable for this browser session. */
 export function makeRunSeed(search = window.location.search) {
-  const requested = new URLSearchParams(search).get('seed');
-  if (requested !== null && requested.trim() !== '') {
-    const parsed = Number(requested);
-    if (Number.isFinite(parsed)) return (Math.trunc(parsed) >>> 0);
-  }
-  return (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+  const parameter = new URLSearchParams(search).get('seed');
+  const number = parameter?.trim() ? Number(parameter) : NaN;
+  if (Number.isFinite(number)) return Math.trunc(number) >>> 0;
+
+  const now = Date.now();
+  const salt = Math.floor(Math.random() * 0xffffffff);
+  return (now ^ salt) >>> 0;
 }

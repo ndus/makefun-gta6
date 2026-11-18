@@ -1,5 +1,11 @@
 import { CITY } from './config.js';
 
+const FALLBACK_ROADS = {
+  x: [560, 1160, 1760, 2360, 2960, 3560],
+  y: [420, 960, 1500, 2040, 2580, 3120],
+};
+
+/** Creates the cached DOM and canvas bindings used to present the game HUD. */
 export function createHud() {
   const health = document.getElementById('health-fill');
   const cash = document.getElementById('cash');
@@ -12,6 +18,7 @@ export function createHud() {
   const dialogueCopy = document.getElementById('dialogue-copy');
   const mode = document.getElementById('mode');
   const map = document.getElementById('minimap');
+  const bustedFill = busted.firstElementChild;
   const context = map.getContext('2d');
   const scaleX = map.width / CITY.width;
   const scaleY = map.height / CITY.height;
@@ -28,10 +35,11 @@ export function createHud() {
     context.fillRect(0, 0, CITY.waterWidth * scaleX, map.height);
     const park = game.world.park;
     context.fillStyle = '#348260'; context.fillRect(park.left * scaleX, park.top * scaleY, (park.right - park.left) * scaleX, (park.bottom - park.top) * scaleY);
+    const roads = game.world.roads ?? FALLBACK_ROADS;
     context.save(); context.beginPath(); context.rect(CITY.waterWidth * scaleX, 0, (CITY.width - CITY.waterWidth) * scaleX, (CITY.height - 86) * scaleY); context.clip();
     context.strokeStyle = '#c2c8d0'; context.lineWidth = 4;
-    for (const x of game.world.roads.x) { context.beginPath(); context.moveTo(x * scaleX, 0); context.lineTo(x * scaleX, map.height); context.stroke(); }
-    for (const y of game.world.roads.y) { context.beginPath(); context.moveTo(0, y * scaleY); context.lineTo(map.width, y * scaleY); context.stroke(); }
+    for (const x of roads.x) { context.beginPath(); context.moveTo(x * scaleX, 0); context.lineTo(x * scaleX, map.height); context.stroke(); }
+    for (const y of roads.y) { context.beginPath(); context.moveTo(0, y * scaleY); context.lineTo(map.width, y * scaleY); context.stroke(); }
     context.restore();
     for (const car of game.vehicles.cars) {
       context.fillStyle = car.driverKind === 'player' ? '#fff18c' : '#f58b86';
@@ -68,7 +76,7 @@ export function createHud() {
     objective.textContent = `${game.objective ?? 'Free roam · Viretta is yours to read.'}${distance === null ? '' : ` · ${distance} m`}`;
     const meter = game.police?.busted ?? 0;
     busted.hidden = meter <= 0;
-    busted.firstElementChild.style.width = `${Math.round(meter * 100)}%`;
+    bustedFill.style.width = `${Math.round(meter * 100)}%`;
     banner.hidden = !(game.missions?.bannerTimer > 0);
     banner.textContent = game.missions?.banner ?? '';
     const line = game.missions?.dialogue?.[0];

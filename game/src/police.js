@@ -1,6 +1,16 @@
 import { CITY, VEHICLE } from './config.js';
 
-const LEVEL_CAPS = [0, 0, 1, 2, 3, 4];
+// Indexed by wanted stars. Delay is the time in seconds between reinforcements.
+const DISPATCH = [
+  { cap: 0, delay: 0, roadblocks: 0 },
+  { cap: 0, delay: 0, roadblocks: 0 },
+  { cap: 1, delay: 4.7, roadblocks: 0 },
+  { cap: 2, delay: 4.05, roadblocks: 0 },
+  { cap: 3, delay: 3.4, roadblocks: 2 },
+  { cap: 4, delay: 2.75, roadblocks: 2 },
+];
+const BUSTED_GAIN_PER_SECOND = 0.36;
+const BUSTED_DECAY_PER_SECOND = 0.65;
 const CRIME_WEIGHT = {
   carTheft: 1.25,
   shooting: 0.7,
@@ -49,7 +59,7 @@ function nearestRoad(world, x, y) {
   return best;
 }
 
-function spawnUnit(state, actor, random) {
+function spawnUnit(state, actor, random, roadblocks) {
   const { world, police } = state;
   const angle = random() * Math.PI * 2;
   const radius = 880 + random() * 180;
@@ -57,7 +67,7 @@ function spawnUnit(state, actor, random) {
   const id = police.nextId++;
   const car = makePoliceCar(id, candidate.x, candidate.y, Math.atan2(actor.y - candidate.y, actor.x - candidate.x));
   car.speed = 90;
-  car.roadblock = state.wanted >= 4 && police.units.filter((unit) => unit.roadblock).length < Math.floor(state.wanted / 2);
+  car.roadblock = police.units.filter((unit) => unit.roadblock).length < roadblocks;
   if (car.roadblock) {
     const heading = actor.angle ?? actor.vehicle?.angle ?? 0;
     const aheadX = actor.x + Math.cos(heading) * 300;
@@ -69,9 +79,9 @@ function spawnUnit(state, actor, random) {
     car.speed = 0;
   }
   police.units.push(car);
-  return car;
 }
 
+/** Create the shared patrol state for a new run. */
 export function createPoliceSystem() {
   return { units: [], officers: [], nextId: 1, busted: 0, noSightTime: 0, visible: false, shotCooldown: 0 };
 }
@@ -85,20 +95,31 @@ export function reportCrime(state, kind, amount = 1) {
   return state.wanted;
 }
 
-export function updatePolice(state, dt, random, hooks = {}) {
-  if (!state.police || !state.player || !state.world) return;
-  const { police, player, world } = state;
-  const actor = actorFor(player);
-  const level = Math.ceil(state.wanted ?? 0);
-  police.units = police.units.filter((unit) => unit.health > 0 && distance(unit, actor) < 1600);
+// Remove cars and their dismounted officers in place so readers keep live arrays.
+function prunePatrols(police, actor) {
+  for (let i = police.units.length - 1; i >= 0; i -= 1) {
+    const unit = police.units[i];
+    if (!(unit.health > 0 && distance(unit, actor) < 1600)) police.units.splice(i, 1);
+  }
+  const officerIds = new Set(police.units.map((unit) => `officer-${unit.id}`));
+  for (let i = police.officers.length - 1; i >= 0; i -= 1) {
+    const officer = police.officers[i];
+    if (officer.health <= 0 || !officerIds.has(officer.id)) police.officers.splice(i, 1);
+  }
+}
 
-  const desiredCount = LEVEL_CAPS[level] ?? 0;
-  if (police.units.length < desiredCount && police.spawnTimer <= 0) {
-    spawnUnit(state, actor, random);
-    police.spawnTimer = Math.max(1.8, 6 - level * 0.65);
+function updateDispatch(state, actor, level, dt, random) {
+  const { police } = state;
+  const dispatch = DISPATCH[level];
+  if (dispatch && police.units.length < dispatch.cap && police.spawnTimer <= 0) {
+    spawnUnit(state, actor, random, state.wanted >= 4 ? dispatch.roadblocks : 0);
+    police.spawnTimer = dispatch.delay;
   }
   police.spawnTimer = Math.max(0, (police.spawnTimer ?? 0) - dt);
+}
 
+function updateVisibility(state, actor, dt) {
+  const { police, world } = state;
   police.visible = police.units.some((unit) => distance(unit, actor) < 560 && hasLineOfSight(world, unit, actor));
   police.noSightTime = police.visible ? 0 : police.noSightTime + dt;
   if (state.wanted > 0 && !police.visible) {
@@ -106,25 +127,33 @@ export function updatePolice(state, dt, random, hooks = {}) {
     state.wantedHeat = Math.max(0, (state.wantedHeat ?? state.wanted) - dt * rate);
     state.wanted = Math.ceil(state.wantedHeat);
   }
+}
 
-  const wantedCount = police.units.length > 0 || level > 0;
-  if (wantedCount && !player.vehicle && level >= 2 && police.officers.length === 0) {
-    const nearest = police.units[0];
-    if (nearest && distance(nearest, actor) < 245) {
-      police.officers.push({ id: `officer-${nearest.id}`, x: nearest.x + 32, y: nearest.y + 18, angle: nearest.angle, health: 100, kind: 'officer', fireCooldown: 1 });
+function updateOfficers(police, player, actor, level, dt) {
+  if (player.vehicle) {
+    police.officers.length = 0;
+    return;
+  }
+
+  const leadUnit = police.units[0];
+  if (level >= 2 && police.officers.length === 0 && leadUnit && distance(leadUnit, actor) < 245) {
+    police.officers.push({
+      id: `officer-${leadUnit.id}`, x: leadUnit.x + 32, y: leadUnit.y + 18,
+      angle: leadUnit.angle, health: 100, kind: 'officer', fireCooldown: 1,
+    });
+  }
+
+  for (const officer of police.officers) {
+    officer.angle = Math.atan2(actor.y - officer.y, actor.x - officer.x);
+    if (distance(officer, actor) > 320) {
+      officer.x += Math.cos(officer.angle) * 88 * dt;
+      officer.y += Math.sin(officer.angle) * 88 * dt;
     }
   }
-  if (!player.vehicle) {
-    for (const officer of police.officers) {
-      const gap = distance(officer, actor);
-      officer.angle = Math.atan2(actor.y - officer.y, actor.x - officer.x);
-      if (gap > 320) {
-        officer.x += Math.cos(officer.angle) * 88 * dt;
-        officer.y += Math.sin(officer.angle) * 88 * dt;
-      }
-    }
-  } else police.officers.length = 0;
+}
 
+function updatePatrolCars(state, actor, level, dt, random, hooks) {
+  const { police, player, world } = state;
   let close = false;
   for (const unit of police.units) {
     unit.sirenPhase = (unit.sirenPhase + dt * 8) % (Math.PI * 2);
@@ -136,7 +165,7 @@ export function updatePolice(state, dt, random, hooks = {}) {
     const targetY = actor.y + Math.sin(targetHeading) * interceptDistance;
     if (!unit.roadblock) {
       const desiredAngle = Math.atan2(targetY - unit.y, targetX - unit.x);
-      let turn = Math.atan2(Math.sin(desiredAngle - unit.angle), Math.cos(desiredAngle - unit.angle));
+      const turn = Math.atan2(Math.sin(desiredAngle - unit.angle), Math.cos(desiredAngle - unit.angle));
       unit.angle += Math.max(-2.2 * dt, Math.min(2.2 * dt, turn));
       const targetSpeed = Math.min(290, 150 + level * 25);
       unit.speed += Math.sign(targetSpeed - unit.speed) * Math.min(Math.abs(targetSpeed - unit.speed), 115 * dt);
@@ -166,11 +195,29 @@ export function updatePolice(state, dt, random, hooks = {}) {
       hooks.onPoliceFire?.(unit, actor);
     }
   }
-  for (const officer of police.officers) if (distance(officer, actor) < 48) close = true;
+  return close;
+}
 
+function updateBustedMeter(police, player, close, dt, hooks) {
   const nearlyStopped = player.vehicle && Math.abs(player.vehicle.speed) < 30;
-  if (close && (!player.vehicle || nearlyStopped)) police.busted = Math.min(1, police.busted + dt * 0.36);
-  else police.busted = Math.max(0, police.busted - dt * 0.65);
+  if (close && (!player.vehicle || nearlyStopped)) police.busted = Math.min(1, police.busted + dt * BUSTED_GAIN_PER_SECOND);
+  else police.busted = Math.max(0, police.busted - dt * BUSTED_DECAY_PER_SECOND);
   if (police.busted >= 1) hooks.onBusted?.();
+}
+
+/** Advance dispatch, pursuit, wanted decay, and arrest progress by one tick. */
+export function updatePolice(state, dt, random, hooks = {}) {
+  if (!state.police || !state.player || !state.world) return;
+  const { police, player } = state;
+  const actor = actorFor(player);
+  const level = Math.ceil(state.wanted ?? 0);
+
+  prunePatrols(police, actor);
+  updateDispatch(state, actor, level, dt, random);
+  updateVisibility(state, actor, dt);
+  updateOfficers(police, player, actor, level, dt);
+  const carClose = updatePatrolCars(state, actor, level, dt, random, hooks);
+  const officerClose = police.officers.some((officer) => distance(officer, actor) < 48);
+  updateBustedMeter(police, player, carClose || officerClose, dt, hooks);
   hooks.setSiren?.(police.units.length > 0);
 }

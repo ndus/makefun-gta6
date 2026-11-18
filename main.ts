@@ -1,7 +1,7 @@
 // Neon Reign: Viretta follows Luca “Shade” Marquez through a city after dark.
-// Serve the city locally with node serve.ts at http://localhost:8080.
-// This entry packages the game and screenshots and writes the dossier for submission.
-// Set MAKEFUN_OUTPUT_DIR=out to build into a local directory.
+// Play locally: run `node serve.ts` and open http://localhost:8080.
+// Build the submission dossier: run `MAKEFUN_OUTPUT_DIR=out node main.ts`.
+// The build packages the game and screenshots alongside dossier.json.
 
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

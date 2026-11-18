@@ -1,87 +1,321 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#090d18">
-<link rel="icon" href="data:,">
-<title>Neon Reign: Viretta</title>
-<style>
-  :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-  * { box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #080c15; color: #f4f5fa; }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  #hud { position: fixed; inset: 0; z-index: 2; pointer-events: none; text-shadow: 0 2px 8px #03040a; }
-  .hud-top { display: flex; align-items: flex-start; gap: 18px; padding: 22px 24px; }
-  .panel { background: linear-gradient(135deg, rgba(10,15,28,.9), rgba(24,22,42,.76)); border: 1px solid rgba(98,225,237,.34); box-shadow: 0 0 24px rgba(22,215,230,.12), inset 0 0 20px rgba(187,55,212,.07); backdrop-filter: blur(8px); }
-  #health-card { width: 220px; padding: 12px 14px; border-radius: 4px; }
-  .eyebrow { color: #74e8f2; font-size: 10px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; }
-  #health-value { margin-top: 8px; height: 8px; overflow: hidden; background: #25283a; }
-  #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg,#fc547b,#ffb15b); box-shadow: 0 0 12px #ff4b86; transition: width .15s; }
-  #cash-card { padding: 14px 18px; min-width: 135px; border-radius: 4px; }
-  #cash { margin-top: 3px; color: #ffe68e; font-size: 21px; font-weight: 800; }
-  #wanted { padding: 13px 14px; min-width: 130px; border-radius: 4px; color: #f9c55d; letter-spacing: .2em; font-size: 18px; }
-  #wanted.decaying { animation: wanted-pulse .7s steps(2, jump-none) infinite; }
-  @keyframes wanted-pulse { 50% { opacity: .35; } }
-  #busted-meter { position: absolute; top: 68px; left: 24px; width: 220px; height: 7px; background: #251421; border: 1px solid #f15c79; }
-  #busted-meter[hidden], #mission-banner[hidden] { display: none; }
-  #busted-meter > div { height: 100%; width: 0; background: #f15c79; box-shadow: 0 0 12px #f15c79; }
-  #mission-banner { position: absolute; top: 22%; left: 50%; transform: translateX(-50%); padding: 14px 24px; border-left: 3px solid #f5c45d; background: rgba(9,14,24,.92); color: #ffe28a; font-weight: 800; text-align: center; }
-  #objective { position: absolute; top: 108px; left: 24px; max-width: min(470px, 50vw); padding: 11px 15px; border-left: 3px solid #e857cf; color: #f7eefa; font-size: 13px; letter-spacing: .03em; }
-  #mode { position: absolute; left: 24px; bottom: 22px; padding: 10px 14px; color: #a8f3f5; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
-  #minimap { position: absolute; right: 24px; top: 22px; width: 190px; height: 150px; border: 1px solid rgba(124,234,244,.6); background: rgba(8,12,22,.8); box-shadow: 0 0 22px rgba(0,224,242,.15); }
-  .overlay { position: fixed; z-index: 4; inset: 0; display: grid; place-items: center; background: rgba(5,7,15,.56); backdrop-filter: blur(3px); }
-  .overlay[hidden], #dialogue[hidden] { display: none; }
-  .card { width: min(650px, calc(100vw - 34px)); padding: clamp(24px, 5vw, 48px); border: 1px solid rgba(86,232,239,.48); background: linear-gradient(145deg, rgba(9,15,29,.96), rgba(30,13,37,.94)); box-shadow: 0 0 55px rgba(228,55,204,.16), 0 0 24px rgba(33,229,240,.1); }
-  .kicker { color: #76e8ee; font-size: 11px; font-weight: 800; letter-spacing: .25em; text-transform: uppercase; }
-  h1 { margin: 12px 0 8px; font-size: clamp(34px, 7vw, 62px); line-height: .94; letter-spacing: -.055em; text-transform: uppercase; }
-  h1 span { color: #f45dc9; text-shadow: 0 0 24px rgba(245,70,211,.48); }
-  .story { max-width: 530px; margin: 18px 0 24px; color: #c3c8d5; line-height: 1.6; }
-  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 20px; margin: 0 0 24px; padding: 16px; list-style: none; background: rgba(255,255,255,.035); color: #b7bfce; font-size: 12px; }
-  kbd { display: inline-block; min-width: 34px; margin-right: 7px; padding: 4px 6px; border: 1px solid #566273; border-radius: 3px; color: #f2f4f9; text-align: center; font: 700 10px ui-monospace, monospace; }
-  .buttons { display: flex; gap: 12px; }
-  button { min-height: 46px; padding: 0 23px; border: 1px solid #65edf1; border-radius: 2px; background: linear-gradient(105deg,#12b8c4,#b83d9d); color: white; font: 800 12px inherit; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; box-shadow: 0 0 20px rgba(36,224,231,.2); }
-  button.secondary { background: rgba(255,255,255,.06); border-color: #667085; box-shadow: none; }
-  button:hover { filter: brightness(1.18); }
-  #pause-overlay .card, #busted-overlay .card { width: min(420px, calc(100vw - 34px)); text-align: center; }
-  #pause-overlay h2, #busted-overlay h2 { margin: 10px 0; font-size: 38px; text-transform: uppercase; }
-  #dialogue { position: fixed; z-index: 3; left: 50%; bottom: 74px; width: min(620px, calc(100vw - 34px)); transform: translateX(-50%); padding: 17px 20px; border: 1px solid #d75ec8; background: rgba(12,11,24,.94); box-shadow: 0 0 28px rgba(226,50,198,.24); color: #eef0f8; line-height: 1.5; }
-  #dialogue strong { display: block; margin-bottom: 5px; color: #f56ccd; font-size: 11px; letter-spacing: .16em; text-transform: uppercase; }
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  @media (max-width: 680px) { .hud-top { gap: 8px; padding: 12px; } #health-card { width: 142px; } #cash-card { min-width: 98px; padding: 12px; } #wanted { display: block; min-width: 92px; padding: 12px 7px; font-size: 14px; letter-spacing: .04em; } #busted-meter { top: 62px; left: 12px; width: 142px; } #minimap { right: 12px; top: 84px; width: 135px; height: 110px; } #objective { top: auto; bottom: 74px; left: 12px; max-width: calc(100vw - 170px); font-size: 11px; } #mode { left: 12px; bottom: 16px; } .controls { grid-template-columns: 1fr; } }
-</style>
-</head>
-<body>
-<canvas id="game" aria-label="Neon Reign: Viretta, a top-down neon city adventure"></canvas>
-<div id="hud" aria-hidden="true">
-  <div class="hud-top">
-    <div id="health-card" class="panel"><div class="eyebrow">Vital signs</div><div id="health-value"><div id="health-fill"></div></div></div>
-    <div id="cash-card" class="panel"><div class="eyebrow">Cash</div><div id="cash">$0</div></div>
-    <div id="wanted" class="panel" aria-label="Wanted level placeholder">☆☆☆☆☆</div>
-  </div>
-  <div id="objective" class="panel">Free roam · Viretta is yours to read.</div>
-  <div id="busted-meter" hidden><div></div></div>
-  <div id="mission-banner" hidden></div>
-  <div id="mode" class="panel">ON FOOT · VIRETTA</div>
-  <canvas id="minimap" width="380" height="300" aria-label="City minimap"></canvas>
-</div>
-<div id="start-overlay" class="overlay">
-  <section class="card">
-    <div class="kicker">A Viretta City Story</div>
-    <h1>Neon Reign:<br><span>Viretta</span></h1>
-    <p class="story">Luca “Shade” Marquez knows every dock boss, back-alley broker, and velvet-rope gate from the harbor to the casino strip. Tonight the tide is turning. Find a ride, read the city, and decide who gets to own the dark.</p>
-    <ul class="controls">
-      <li><kbd>WASD</kbd><kbd>↑↓←→</kbd> move / drive</li><li><kbd>E</kbd> enter or leave a car</li>
-      <li><kbd>SHIFT</kbd> sprint on foot</li><li><kbd>SPACE</kbd> fire sidearm</li>
-      <li><kbd>P</kbd><kbd>ESC</kbd> pause</li><li><kbd>M</kbd> mute audio</li>
-    </ul>
-    <div class="buttons"><button id="start-button">Start</button><button id="continue-button" class="secondary">Continue</button></div>
-  </section>
-</div>
-<div id="pause-overlay" class="overlay" hidden><section class="card"><div class="kicker">Take a breath</div><h2>Paused</h2><p class="story">The lights keep humming. The city can wait.</p><div class="buttons" style="justify-content:center"><button id="resume-button">Resume</button><button id="pause-title-button" class="secondary">Title</button></div></section></div>
-<div id="busted-overlay" class="overlay" hidden><section class="card"><div class="kicker">End of the road</div><h2>Wasted</h2><p id="busted-copy" class="story">Viretta wins this round.</p><div class="buttons" style="justify-content:center"><button id="retry-button">Try again</button><button id="wasted-title-button" class="secondary">Title</button></div></section></div>
-<div id="dialogue" hidden><strong id="dialogue-speaker">Contact</strong><span id="dialogue-copy"></span></div>
-<p id="status" role="status" aria-live="polite"></p>
-<script type="module" src="./src/main.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8">
+    <meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport">
+    <meta content="#090d18" name="theme-color">
+    <title>Neon Reign: Viretta</title>
+    <link href="data:," rel="icon">
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        --screen-gutter: 24px;
+        --screen-top: 22px;
+        --card-limit: calc(100vw - 34px);
+      }
+
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        color: #f4f5fa;
+        background: #080c15;
+      }
+
+      #game, #hud, .overlay { position: fixed; inset: 0; }
+      #game { display: block; width: 100%; height: 100%; touch-action: none; }
+      #hud {
+        pointer-events: none;
+        text-shadow: 0 2px 8px #03040a;
+        z-index: 2;
+      }
+      .hud-top {
+        padding: var(--screen-top) var(--screen-gutter);
+        gap: 18px;
+        align-items: flex-start;
+        display: flex;
+      }
+      .panel {
+        border: 1px solid rgb(98 225 237 / 34%);
+        background: linear-gradient(135deg, rgb(10 15 28 / 90%), rgb(24 22 42 / 76%));
+        backdrop-filter: blur(8px);
+        box-shadow: 0 0 24px rgb(22 215 230 / 12%), inset 0 0 20px rgb(187 55 212 / 7%);
+      }
+      #health-card, #cash-card, #wanted { border-radius: 4px; }
+      #health-card { padding: 12px 14px; width: 220px; }
+      #cash-card { min-width: 135px; padding: 14px 18px; }
+      #wanted {
+        min-width: 130px;
+        font-size: 18px;
+        letter-spacing: .2em;
+        color: #f9c55d;
+        padding: 13px 14px;
+      }
+      .eyebrow, .kicker {
+        text-transform: uppercase;
+        font-weight: 800;
+      }
+      .eyebrow { letter-spacing: .18em; font-size: 10px; color: #74e8f2; }
+      #cash { font-weight: 800; font-size: 21px; color: #ffe68e; margin-top: 3px; }
+      #health-value {
+        background: #25283a;
+        overflow: hidden;
+        height: 8px;
+        margin-top: 8px;
+      }
+      #health-fill {
+        width: 100%;
+        height: 100%;
+        box-shadow: 0 0 12px #ff4b86;
+        background: linear-gradient(to right, #fc547b, #ffb15b);
+        transition: width 150ms;
+      }
+      #wanted.decaying { animation: wanted-fade 700ms steps(2, jump-none) infinite; }
+      @keyframes wanted-fade { 50% { opacity: .35; } }
+      #busted-meter, #objective, #mode, #mission-banner, #minimap { position: absolute; }
+      #busted-meter, #objective, #mode { left: var(--screen-gutter); }
+      #busted-meter {
+        --meter-color: #f15c79;
+        border: 1px solid var(--meter-color);
+        background: #251421;
+        width: 220px;
+        height: 7px;
+        top: 68px;
+      }
+      #busted-meter > div {
+        width: 0;
+        height: 100%;
+        box-shadow: 0 0 12px var(--meter-color);
+        background: var(--meter-color);
+      }
+      #objective {
+        border-left: 3px solid #e857cf;
+        letter-spacing: .03em;
+        color: #f7eefa;
+        max-width: min(470px, 50vw);
+        font-size: 13px;
+        padding: 11px 15px;
+        top: 108px;
+      }
+      #mode {
+        bottom: 22px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #a8f3f5;
+        text-transform: uppercase;
+        letter-spacing: .12em;
+        padding: 10px 14px;
+      }
+      #mission-banner, #dialogue { left: 50%; transform: translateX(-50%); }
+      #mission-banner {
+        text-align: center;
+        font-weight: 800;
+        color: #ffe28a;
+        background: rgb(9 14 24 / 92%);
+        border-left: 3px solid #f5c45d;
+        padding: 14px 24px;
+        top: 22%;
+      }
+      #minimap {
+        top: var(--screen-top);
+        right: var(--screen-gutter);
+        height: 150px;
+        width: 190px;
+        box-shadow: 0 0 22px rgb(0 224 242 / 15%);
+        background: rgb(8 12 22 / 80%);
+        border: 1px solid rgb(124 234 244 / 60%);
+      }
+
+      .overlay {
+        display: grid;
+        place-items: center;
+        backdrop-filter: blur(3px);
+        background: rgb(5 7 15 / 56%);
+        z-index: 4;
+      }
+      .overlay[hidden], #dialogue[hidden], #busted-meter[hidden], #mission-banner[hidden] {
+        display: none;
+      }
+      .card {
+        padding: clamp(24px, 5vw, 48px);
+        width: min(650px, var(--card-limit));
+        box-shadow: 0 0 55px rgb(228 55 204 / 16%), 0 0 24px rgb(33 229 240 / 10%);
+        background: linear-gradient(145deg, rgb(9 15 29 / 96%), rgb(30 13 37 / 94%));
+        border: 1px solid rgb(86 232 239 / 48%);
+      }
+      .kicker { letter-spacing: .25em; font-size: 11px; color: #76e8ee; }
+      h1 {
+        text-transform: uppercase;
+        letter-spacing: -.055em;
+        line-height: .94;
+        font-size: clamp(34px, 7vw, 62px);
+        margin: 12px 0 8px;
+      }
+      h1 span { text-shadow: 0 0 24px rgb(245 70 211 / 48%); color: #f45dc9; }
+      .story { line-height: 1.6; color: #c3c8d5; margin: 18px 0 24px; max-width: 530px; }
+      .controls {
+        list-style: none;
+        margin: 0 0 24px;
+        padding: 16px;
+        background: rgb(255 255 255 / 3.5%);
+        color: #b7bfce;
+        font-size: 12px;
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 9px 20px;
+      }
+      kbd {
+        display: inline-block;
+        font: 700 10px ui-monospace, monospace;
+        text-align: center;
+        color: #f2f4f9;
+        border-radius: 3px;
+        border: 1px solid #566273;
+        padding: 4px 6px;
+        margin-right: 7px;
+        min-width: 34px;
+      }
+      .buttons { gap: 12px; display: flex; }
+      button {
+        cursor: pointer;
+        text-transform: uppercase;
+        letter-spacing: .12em;
+        color: white;
+        box-shadow: 0 0 20px rgb(36 224 231 / 20%);
+        background: linear-gradient(105deg, #12b8c4, #b83d9d);
+        border-radius: 2px;
+        border: 1px solid #65edf1;
+        padding: 0 23px;
+        min-height: 46px;
+      }
+      button:hover { filter: brightness(118%); }
+      button.secondary {
+        box-shadow: none;
+        border-color: #667085;
+        background: rgb(255 255 255 / 6%);
+      }
+      .compact-card { text-align: center; width: min(420px, var(--card-limit)); }
+      .compact-card h2 { text-transform: uppercase; font-size: 38px; margin: 10px 0; }
+      .compact-card .buttons { justify-content: center; }
+      #dialogue {
+        position: fixed;
+        z-index: 3;
+        bottom: 74px;
+        width: min(620px, var(--card-limit));
+        padding: 17px 20px;
+        border: 1px solid #d75ec8;
+        background: rgb(12 11 24 / 94%);
+        box-shadow: 0 0 28px rgb(226 50 198 / 24%);
+        color: #eef0f8;
+        line-height: 1.5;
+      }
+      #dialogue-speaker {
+        text-transform: uppercase;
+        letter-spacing: .16em;
+        font-size: 11px;
+        color: #f56ccd;
+        margin-bottom: 5px;
+        display: block;
+      }
+      #status {
+        white-space: nowrap;
+        clip-path: inset(50%);
+        overflow: hidden;
+        height: 1px;
+        width: 1px;
+        position: absolute;
+      }
+
+      @media (max-width: 680px) {
+        :root { --screen-gutter: 12px; --screen-top: 12px; }
+        .hud-top { gap: 8px; }
+        #health-card, #busted-meter { width: 142px; }
+        #cash-card { padding: 12px; min-width: 98px; }
+        #wanted { font-size: 14px; letter-spacing: .04em; padding: 12px 7px; min-width: 92px; display: block; }
+        #busted-meter { top: 62px; }
+        #minimap { height: 110px; width: 135px; top: 84px; }
+        #objective { font-size: 11px; max-width: calc(100vw - 170px); bottom: 74px; top: auto; }
+        #mode { bottom: 16px; }
+        .controls { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas aria-label="Neon Reign: Viretta, a top-down neon city adventure" id="game"></canvas>
+
+    <!-- The renderer owns the canvases while the HUD module updates the readouts. -->
+    <div aria-hidden="true" id="hud">
+      <div class="hud-top">
+        <div class="panel" id="health-card">
+          <div class="eyebrow">Vital signs</div>
+          <div id="health-value">
+            <div id="health-fill"></div>
+          </div>
+        </div>
+        <div class="panel" id="cash-card">
+          <div class="eyebrow">Cash</div>
+          <div id="cash">$0</div>
+        </div>
+        <div aria-label="Wanted level placeholder" class="panel" id="wanted">☆☆☆☆☆</div>
+      </div>
+      <div class="panel" id="objective">Free roam · Viretta is yours to read.</div>
+      <div hidden id="busted-meter"><div></div></div>
+      <div hidden id="mission-banner"></div>
+      <div class="panel" id="mode">ON FOOT · VIRETTA</div>
+      <canvas aria-label="City minimap" height="300" width="380" id="minimap"></canvas>
+    </div>
+
+    <div class="overlay" id="start-overlay">
+      <section class="card">
+        <div class="kicker">A Viretta City Story</div>
+        <h1>Neon Reign:<br><span>Viretta</span></h1>
+        <p class="story">Luca “Shade” Marquez knows every dock boss, back-alley broker, and velvet-rope gate from the harbor to the casino strip. Tonight the tide is turning. Find a ride, read the city, and decide who gets to own the dark.</p>
+        <ul class="controls">
+          <li><kbd>WASD</kbd><kbd>↑↓←→</kbd> move / drive</li>
+          <li><kbd>E</kbd> enter or leave a car</li>
+          <li><kbd>SHIFT</kbd> sprint on foot</li>
+          <li><kbd>SPACE</kbd> fire sidearm</li>
+          <li><kbd>P</kbd><kbd>ESC</kbd> pause</li>
+          <li><kbd>M</kbd> mute audio</li>
+        </ul>
+        <div class="buttons">
+          <button id="start-button">Start</button>
+          <button class="secondary" id="continue-button">Continue</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="overlay" hidden id="pause-overlay">
+      <section class="card compact-card">
+        <div class="kicker">Take a breath</div>
+        <h2>Paused</h2>
+        <p class="story">The lights keep humming. The city can wait.</p>
+        <div class="buttons">
+          <button id="resume-button">Resume</button>
+          <button class="secondary" id="pause-title-button">Title</button>
+        </div>
+      </section>
+    </div>
+    <div class="overlay" hidden id="busted-overlay">
+      <section class="card compact-card">
+        <div class="kicker">End of the road</div>
+        <h2>Wasted</h2>
+        <p class="story" id="busted-copy">Viretta wins this round.</p>
+        <div class="buttons">
+          <button id="retry-button">Try again</button>
+          <button class="secondary" id="wasted-title-button">Title</button>
+        </div>
+      </section>
+    </div>
+
+    <div hidden id="dialogue">
+      <strong id="dialogue-speaker">Contact</strong>
+      <span id="dialogue-copy"></span>
+    </div>
+    <p aria-live="polite" role="status" id="status"></p>
+    <script src="./src/main.js" type="module"></script>
+  </body>
 </html>

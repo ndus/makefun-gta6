@@ -2,14 +2,14 @@ import { MAX_FRAME, STEP, createRandom, makeRunSeed } from './config.js';
 import { createAudio } from './audio.js';
 import { createHud } from './hud.js';
 import { createInput } from './input.js';
+import { createMissions, resetMissionAfterFailure, updateMissions } from './missions.js';
 import { createPedestrians, updatePedestrians } from './pedestrians.js';
 import { createPlayer, damagePlayer, updatePlayer, updatePlayerHealth } from './player.js';
+import { createPoliceSystem, reportCrime, updatePolice } from './police.js';
 import { createRenderer } from './render.js';
 import { stageScene } from './shots.js';
 import { createVehicleSystem, updateTraffic } from './vehicles.js';
 import { createWorld } from './world.js';
-import { createPoliceSystem, reportCrime, updatePolice } from './police.js';
-import { createMissions, resetMissionAfterFailure, updateMissions } from './missions.js';
 
 const SAVE_KEY = 'neon-reign-viretta.save.v1';
 const TITLE_CAMERA = { x: 2360, y: 1080 };
@@ -32,6 +32,8 @@ const endHeading = endOverlay.querySelector('h2');
 const shot = new URLSearchParams(location.search).get('shot');
 const seed = makeRunSeed();
 const world = createWorld(createRandom(seed));
+
+// Run persistence and initialization
 
 function readSave() {
   try {
@@ -56,9 +58,6 @@ let random;
 let accumulator = 0;
 let engineActive = false;
 const game = { world };
-game.particles = [];
-game.pickups = [];
-game.wanted = 0;
 
 function resetRun(save = null) {
   random = createRandom(seed ^ 0x95ac42de);
@@ -95,6 +94,8 @@ function saveRun() {
   }
 }
 
+// State transitions and overlay controls
+
 function syncOverlays() {
   startOverlay.hidden = game.state !== 'start';
   pauseOverlay.hidden = game.state !== 'paused';
@@ -120,32 +121,19 @@ function setState(state, message) {
   status.textContent = message;
 }
 
-function followCamera(dt) {
-  const car = game.player.vehicle;
-  const target = game.stageCamera ?? (game.state === 'start' ? TITLE_CAMERA : game.player);
-  const movement = game.state === 'playing' ? input.movement() : { x: 0, y: 0 };
-  const lead = car ? car.speed * 0.32 : 42;
-  renderer.updateCamera(
-    target,
-    dt,
-    car ? Math.cos(car.angle) * lead : movement.x * lead,
-    car ? Math.sin(car.angle) * lead : movement.y * lead,
-  );
-}
-
 function startRun(save) {
   staging = false;
   resetRun(save);
   saveRun();
   setState('playing', 'Playing. Meet your contact or explore Viretta.');
-  followCamera(1);
+  updateCamera(1);
 }
 
 function returnToTitle() {
   saveRun();
   game.stageCamera = null;
   setState('start', 'Neon Reign: Viretta. Title screen.');
-  followCamera(1);
+  updateCamera(1);
 }
 
 function pause() {
@@ -173,17 +161,8 @@ function bindButton(id, action) {
   });
 }
 
-bindButton('start-button', () => startRun(null));
-bindButton('continue-button', () => startRun(savedRun));
-bindButton('resume-button', resume);
-bindButton('pause-title-button', returnToTitle);
-bindButton('wasted-title-button', returnToTitle);
-bindButton('retry-button', () => startRun(savedRun));
-window.addEventListener('pagehide', () => {
-  if (game.state !== 'start') saveRun();
-});
-
-function handleControls() {
+// Input: handle frame-level controls even while the simulation is paused.
+function updateInput() {
   if (input.consumePress('KeyM')) {
     status.textContent = audio.toggleMute() ? 'Audio muted.' : 'Audio on.';
   }
@@ -265,7 +244,7 @@ function applyShot(shot) {
   if (!witnesses && (hit.kind === 'police' || hit.kind === 'policeCar')) reportCrime(game, 'shooting', 1.4);
 }
 
-function updatePlaying(dt) {
+function updateActors(dt) {
   const { player, vehicles, pedestrians } = game;
   let gunfire = null;
   updatePlayer(player, input, dt, world, vehicles, aim, (shotEvent) => {
@@ -275,7 +254,9 @@ function updatePlaying(dt) {
   }, () => reportCrime(game, 'carTheft'));
   updateTraffic(vehicles, dt, world, random);
   updatePedestrians(pedestrians, dt, vehicles, gunfire);
+}
 
+function resolveTrafficCollisions(player, vehicles, pedestrians) {
   for (const pedestrian of pedestrians) {
     if (pedestrian.down) continue;
     const speed = Math.abs(player.vehicle?.speed ?? 0);
@@ -299,6 +280,12 @@ function updatePlaying(dt) {
       }
     }
   }
+}
+
+function updatePlaying(dt) {
+  const { player, vehicles, pedestrians } = game;
+  updateActors(dt);
+  resolveTrafficCollisions(player, vehicles, pedestrians);
 
   if (player.health <= 0) {
     finishRun('wasted', 'You were struck by traffic.');
@@ -320,6 +307,10 @@ function updatePlaying(dt) {
   updateMissions(game, dt, input, { onReward: () => audio.missionSting() });
   game.progress.missionsCompleted = game.missions.completed;
   game.progress.storyComplete = game.missions.storyComplete;
+  updateEffects(player, dt);
+}
+
+function updateEffects(player, dt) {
   for (const pickup of game.pickups) {
     pickup.life -= dt;
     if (Math.hypot(player.x - pickup.x, player.y - pickup.y) < 28) {
@@ -339,39 +330,75 @@ function updatePlaying(dt) {
   game.particles = game.particles.filter((particle) => particle.age < particle.life);
 }
 
+// Simulation: advance in fixed ticks and keep the title city moving.
+function advanceSimulation(elapsed) {
+  if (game.state !== 'playing' && game.state !== 'start') return;
+  accumulator += elapsed;
+  while (accumulator >= STEP) {
+    accumulator -= STEP;
+    if (game.state === 'playing') {
+      input.takePresses();
+      updatePlaying(STEP);
+    } else {
+      updateTraffic(game.vehicles, STEP, world, random);
+      updatePedestrians(game.pedestrians, STEP, game.vehicles, null);
+    }
+    updateCamera(STEP);
+  }
+}
+
+// Camera: follow the actor or staged view after each simulation tick.
+function updateCamera(dt) {
+  const car = game.player.vehicle;
+  const target = game.stageCamera ?? (game.state === 'start' ? TITLE_CAMERA : game.player);
+  const movement = game.state === 'playing' ? input.movement() : { x: 0, y: 0 };
+  const lead = car ? car.speed * 0.32 : 42;
+  renderer.updateCamera(
+    target,
+    dt,
+    car ? Math.cos(car.angle) * lead : movement.x * lead,
+    car ? Math.sin(car.angle) * lead : movement.y * lead,
+  );
+}
+
+// Render: sync engine audio and paint the current city view.
+function renderFrame() {
+  updateEngine();
+  renderer.draw(game);
+}
+
+// HUD: refresh the overlay and signal that the screenshot can be taken.
+function updateHud(now) {
+  if (game.state !== 'start') hud.update(game, now);
+  if (game.shotReady) window.__shotReady = true;
+}
+
+function frame(now) {
+  const elapsed = Math.min(MAX_FRAME, (now - previousTime) / 1000);
+  previousTime = now;
+  updateInput();
+  advanceSimulation(elapsed);
+  renderFrame();
+  updateHud(now);
+  requestAnimationFrame(frame);
+}
+
+// Wire the UI before preparing and drawing the first scene.
+bindButton('start-button', () => startRun(null));
+bindButton('continue-button', () => startRun(savedRun));
+bindButton('resume-button', resume);
+bindButton('pause-title-button', returnToTitle);
+bindButton('wasted-title-button', returnToTitle);
+bindButton('retry-button', () => startRun(savedRun));
+window.addEventListener('pagehide', () => {
+  if (game.state !== 'start') saveRun();
+});
+
 resetRun();
 game.state = 'start';
 if (staging) stageScene(shot, game, random);
 syncOverlays();
-followCamera(1);
+updateCamera(1);
 
 let previousTime = performance.now();
-function frame(now) {
-  const elapsed = Math.min(MAX_FRAME, (now - previousTime) / 1000);
-  previousTime = now;
-  handleControls();
-
-  if (game.state === 'playing' || game.state === 'start') {
-    accumulator += elapsed;
-    while (accumulator >= STEP) {
-      accumulator -= STEP;
-      if (game.state === 'playing') {
-        input.takePresses();
-        updatePlaying(STEP);
-      } else {
-        // Keep the city behind the title alive.
-        updateTraffic(game.vehicles, STEP, world, random);
-        updatePedestrians(game.pedestrians, STEP, game.vehicles, null);
-      }
-      followCamera(STEP);
-    }
-  }
-
-  updateEngine();
-  renderer.draw(game);
-  if (game.state !== 'start') hud.update(game, now);
-  if (game.shotReady) window.__shotReady = true;
-  requestAnimationFrame(frame);
-}
-
 requestAnimationFrame(frame);

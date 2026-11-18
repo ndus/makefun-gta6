@@ -1,72 +1,68 @@
-const MOVEMENT = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight']);
-const PREVENT_DEFAULT = new Set([...MOVEMENT, 'Space']);
+const AXES = [
+  [['KeyD', 'ArrowRight'], ['KeyA', 'ArrowLeft']],
+  [['KeyS', 'ArrowDown'], ['KeyW', 'ArrowUp']],
+];
+const CAPTURED_KEYS = new Set(['Space', ...AXES.flat(2)]);
+const POINTER_PRESS = ['PointerPrimary', undefined, 'PointerSecondary'];
 
-/** Keyboard holds and one-frame presses, plus pointer state in canvas CSS pixels. */
 export function createInput(canvas) {
-  const held = new Set();
-  const pressed = new Set();
-  let framePressed = new Set();
+  const keysDown = new Set();
+  let queued = new Set();
+  let thisFrame = new Set();
   const pointer = { x: 0, y: 0, buttons: 0, moved: false };
+  const isDown = (code) => keysDown.has(code);
+  const wasPressed = (code) => thisFrame.has(code) || queued.has(code);
 
-  function onKeyDown(event) {
-    if (PREVENT_DEFAULT.has(event.code)) event.preventDefault();
-    if (!held.has(event.code)) pressed.add(event.code);
-    held.add(event.code);
-  }
-
-  function onKeyUp(event) {
-    held.delete(event.code);
-  }
-
-  function onPointerMove(event) {
-    const rect = canvas.getBoundingClientRect();
-    pointer.x = event.clientX - rect.left;
-    pointer.y = event.clientY - rect.top;
-    pointer.moved = true;
-  }
-
-  function clear() {
-    held.clear();
-    pressed.clear();
-    framePressed.clear();
+  window.addEventListener('keydown', (event) => {
+    const key = event.code;
+    if (CAPTURED_KEYS.has(key)) event.preventDefault();
+    if (!isDown(key)) queued.add(key);
+    keysDown.add(key);
+  });
+  window.addEventListener('keyup', ({ code }) => keysDown.delete(code));
+  window.addEventListener('blur', () => {
+    keysDown.clear();
+    queued.clear();
+    thisFrame.clear();
     pointer.buttons = 0;
+  });
+
+  // Keep the mouse in CSS pixels so aiming can use the renderer's viewport.
+  function locatePointer(event) {
+    const { left, top } = canvas.getBoundingClientRect();
+    Object.assign(pointer, { x: event.clientX - left, y: event.clientY - top, moved: true });
   }
 
-  window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
-  window.addEventListener('blur', clear);
-  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointermove', locatePointer);
   canvas.addEventListener('pointerdown', (event) => {
-    onPointerMove(event);
+    locatePointer(event);
     pointer.buttons |= 1 << event.button;
-    if (event.button === 0) pressed.add('PointerPrimary');
-    if (event.button === 2) pressed.add('PointerSecondary');
+    const press = POINTER_PRESS[event.button];
+    if (press) queued.add(press);
     canvas.setPointerCapture?.(event.pointerId);
   });
-  canvas.addEventListener('pointerup', (event) => {
-    pointer.buttons &= ~(1 << event.button);
+  canvas.addEventListener('pointerup', ({ button }) => {
+    pointer.buttons &= ~(1 << button);
   });
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 
+  const axisValue = ([positive, negative]) => Number(positive.some(isDown)) - Number(negative.some(isDown));
   return {
-    isDown(code) { return held.has(code); },
-    wasPressed(code) { return framePressed.has(code) || pressed.has(code); },
+    isDown,
+    wasPressed,
     takePresses() {
-      framePressed = new Set(pressed);
-      pressed.clear();
-      return framePressed;
+      thisFrame = new Set(queued);
+      queued.clear();
+      return thisFrame;
     },
     consumePress(code) {
-      const hadPress = framePressed.has(code) || pressed.has(code);
-      framePressed.delete(code);
-      pressed.delete(code);
-      return hadPress;
+      const pending = thisFrame.has(code) || queued.has(code);
+      thisFrame.delete(code);
+      queued.delete(code);
+      return pending;
     },
     movement() {
-      const x = (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0)
-        - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
-      const y = (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0)
-        - (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0);
+      const [x, y] = AXES.map(axisValue);
       return { x, y };
     },
     pointer,

@@ -1,5 +1,6 @@
 import { reportCrime } from './police.js';
 
+/** Mission titles, locations, intro dialogue, and rewards in story order. */
 export const MISSION_DEFINITIONS = [
   {
     title: 'Echoes of the Harbor',
@@ -31,6 +32,100 @@ const HOLD_TIME = 0.85;
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const actor = (player) => player.vehicle ?? player;
 
+// Keep the exported mission metadata usable by callers independently of the runner.
+const distanceLabel = (label) => ({ gap }) => `${label} · ${Math.round(gap)} m`;
+const interact = (input) => input?.isDown('KeyF') || input?.isDown('KeyE');
+const crime = (amount) => ({ state }) => reportCrime(state, 'missionAct', amount);
+const intro = { id: 'intro', objective: null, target: null, complete: () => true };
+
+function heldNear(radius, duration = HOLD_TIME, onFoot = false) {
+  return ({ state, gap, input, dt }) => {
+    const mission = state.missions;
+    const holding = gap < radius && (!onFoot || !state.player.vehicle) && interact(input);
+    mission.hold = holding ? mission.hold + dt : 0;
+    return mission.hold >= duration;
+  };
+}
+
+const HARBOR_ESCAPE_DIALOGUE = 'The case is yours. Patrols are moving in — lose them before the safehouse.';
+
+// Targets name locations in MISSION_DEFINITIONS. Entry text is shown for the
+// transition tick; objective text is refreshed while the step is active.
+const MISSION_STEPS = [
+  [
+    intro,
+    {
+      id: 'pickup', target: 'pickup',
+      entry: 'Reach the dockyard and hold F to lift the drone case.',
+      objective: distanceLabel('Lift the drone case'),
+      complete: heldNear(48),
+      onComplete: crime(1.1),
+    },
+    {
+      id: 'escape', target: 'safehouse',
+      entry: 'Escape to the harbor safehouse · lose the tail or get below 3 stars.',
+      dialogue: HARBOR_ESCAPE_DIALOGUE,
+      objective: ({ state, gap }) => `Reach the harbor safehouse · ${Math.round(gap)} m · Wanted ${Math.ceil(state.wanted)}`,
+      complete: ({ state, gap }) => gap < 55 && state.wanted < 3,
+    },
+  ],
+  [
+    intro,
+    {
+      id: 'plant', target: 'tower',
+      entry: 'Reach the traffic-control tower and hold F to plant the evidence.',
+      objective: distanceLabel('Plant the evidence'),
+      complete: heldNear(48, 1.15, true),
+      onComplete: crime(1.4),
+    },
+    {
+      id: 'tail', target: null,
+      entry: 'Lose the police completely · Wanted 0.',
+      dialogue: 'Evidence planted. The whole city is looking for a ghost.',
+      objective: ({ state }) => `Lose the police · Wanted ${Math.ceil(state.wanted)}${state.police.units.length ? ' · Break line of sight' : ''}`,
+      complete: ({ state }) => state.wanted <= 0,
+    },
+  ],
+  [
+    {
+      ...intro,
+      onStart(mission) {
+        mission.guards = [
+          { id: 'guard-1', x: 3490, y: 916, angle: 0, health: 100, kind: 'guard', fireCooldown: 0.7 },
+          { id: 'guard-2', x: 3620, y: 916, angle: Math.PI, health: 100, kind: 'guard', fireCooldown: 1.4 },
+          { id: 'guard-3', x: 3560, y: 1028, angle: -Math.PI / 2, health: 100, kind: 'guard', fireCooldown: 2 },
+        ];
+        mission.payoutDropped = false;
+      },
+    },
+    {
+      id: 'guards', target: 'casino',
+      entry: 'Defeat the Sky-Arc guards.',
+      objective: ({ state }) => `Defeat the Sky-Arc guards · ${state.missions.guards.filter((guard) => guard.health > 0).length} remaining`,
+      complete: ({ state }) => state.missions.guards.every((guard) => guard.health <= 0),
+      onComplete: ({ state }) => { state.missions.payoutDropped = true; },
+    },
+    {
+      id: 'case', target: 'case',
+      entry: 'Collect the payout case.',
+      dialogue: 'The casino is quiet. Grab the payout and run.',
+      objective: distanceLabel('Collect the payout case'),
+      complete: ({ gap }) => gap < 52,
+      onComplete: ({ state }) => {
+        state.missions.payoutDropped = false;
+        state.missions.hasPayout = true;
+        reportCrime(state, 'missionAct', 0.8);
+      },
+    },
+    {
+      id: 'escape', target: 'safehouse',
+      entry: 'Escape to the safehouse.',
+      objective: distanceLabel('Escape to the safehouse'),
+      complete: ({ gap }) => gap < 55,
+    },
+  ],
+];
+
 function setObjective(state, label, target) {
   state.objective = label;
   state.target = target ? { ...target } : null;
@@ -46,16 +141,10 @@ function startMission(state, index) {
   mission.dialogueTimer = 3.8;
   mission.banner = `${definition.title} — started`;
   mission.bannerTimer = 3.4;
-  if (index === 2) {
-    mission.guards = [
-      { id: 'guard-1', x: 3490, y: 916, angle: 0, health: 100, kind: 'guard', fireCooldown: 0.7 },
-      { id: 'guard-2', x: 3620, y: 916, angle: Math.PI, health: 100, kind: 'guard', fireCooldown: 1.4 },
-      { id: 'guard-3', x: 3560, y: 1028, angle: -Math.PI / 2, health: 100, kind: 'guard', fireCooldown: 2 },
-    ];
-    mission.payoutDropped = false;
-  }
+  MISSION_STEPS[index][0].onStart?.(mission);
 }
 
+/** Create mission state from saved story progress. */
 export function createMissions(saved = {}) {
   return {
     active: -1,
@@ -72,15 +161,15 @@ export function createMissions(saved = {}) {
   };
 }
 
-function nextStep(state, step, label, target, line) {
+function enterStep(state, definition, step) {
   const mission = state.missions;
-  mission.step = step;
+  mission.step = step.id;
   mission.hold = 0;
-  if (line) {
-    mission.dialogue = [line];
+  if (step.dialogue) {
+    mission.dialogue = [step.dialogue];
     mission.dialogueTimer = 3.8;
   }
-  setObjective(state, label, target);
+  setObjective(state, step.entry, definition[step.target]);
 }
 
 function resolveMission(state, definition, hooks) {
@@ -102,6 +191,7 @@ function resolveMission(state, definition, hooks) {
   hooks.onReward?.(definition.reward);
 }
 
+/** Advance dialogue, offer the next mission, or run one active mission step. */
 export function updateMissions(state, dt, input, hooks = {}) {
   if (!state.missions || !state.player) return;
   const mission = state.missions;
@@ -118,7 +208,7 @@ export function updateMissions(state, dt, input, hooks = {}) {
     if (mission.completed >= MISSION_DEFINITIONS.length) return;
     const definition = MISSION_DEFINITIONS[mission.completed];
     setObjective(state, `Mission: ${definition.title} · Hold F at the marker`, definition.start);
-    if (distance(actorPosition, definition.start) < 46 && (input?.isDown('KeyF') || input?.isDown('KeyE'))) {
+    if (distance(actorPosition, definition.start) < 46 && interact(input)) {
       mission.hold += dt;
       if (mission.hold >= HOLD_TIME) startMission(state, mission.completed);
     } else mission.hold = 0;
@@ -126,60 +216,23 @@ export function updateMissions(state, dt, input, hooks = {}) {
   }
 
   const definition = MISSION_DEFINITIONS[mission.active];
-  const player = state.player;
-  if (mission.active === 0) {
-    if (mission.step === 'intro') nextStep(state, 'pickup', 'Reach the dockyard and hold F to lift the drone case.', definition.pickup);
-    else if (mission.step === 'pickup') {
-      setObjective(state, `Lift the drone case · ${Math.round(distance(actorPosition, definition.pickup))} m`, definition.pickup);
-      if (distance(actorPosition, definition.pickup) < 48 && (input?.isDown('KeyF') || input?.isDown('KeyE'))) {
-        mission.hold += dt;
-        if (mission.hold >= HOLD_TIME) {
-          reportCrime(state, 'missionAct', 1.1);
-          nextStep(state, 'escape', 'Escape to the harbor safehouse · lose the tail or get below 3 stars.', definition.safehouse, 'The case is yours. Patrols are moving in — lose them before the safehouse.');
-        }
-      } else mission.hold = 0;
-    } else if (mission.step === 'escape') {
-      setObjective(state, `Reach the harbor safehouse · ${Math.round(distance(actorPosition, definition.safehouse))} m · Wanted ${Math.ceil(state.wanted)}`, definition.safehouse);
-      if (distance(actorPosition, definition.safehouse) < 55 && state.wanted < 3) resolveMission(state, definition, hooks);
-    }
-  } else if (mission.active === 1) {
-    if (mission.step === 'intro') nextStep(state, 'plant', 'Reach the traffic-control tower and hold F to plant the evidence.', definition.tower);
-    else if (mission.step === 'plant') {
-      setObjective(state, `Plant the evidence · ${Math.round(distance(actorPosition, definition.tower))} m`, definition.tower);
-      if (!player.vehicle && distance(actorPosition, definition.tower) < 48 && (input?.isDown('KeyF') || input?.isDown('KeyE'))) {
-        mission.hold += dt;
-        if (mission.hold >= 1.15) {
-          reportCrime(state, 'missionAct', 1.4);
-          nextStep(state, 'tail', 'Lose the police completely · Wanted 0.', null, 'Evidence planted. The whole city is looking for a ghost.');
-        }
-      } else mission.hold = 0;
-    } else if (mission.step === 'tail') {
-      setObjective(state, `Lose the police · Wanted ${Math.ceil(state.wanted)}${state.police.units.length ? ' · Break line of sight' : ''}`, null);
-      if (state.wanted <= 0) resolveMission(state, definition, hooks);
-    }
-  } else if (mission.active === 2) {
-    if (mission.step === 'intro') nextStep(state, 'guards', 'Defeat the Sky-Arc guards.', definition.casino);
-    else if (mission.step === 'guards') {
-      setObjective(state, `Defeat the Sky-Arc guards · ${mission.guards.filter((guard) => guard.health > 0).length} remaining`, definition.casino);
-      if (mission.guards.every((guard) => guard.health <= 0)) {
-        mission.payoutDropped = true;
-        nextStep(state, 'case', 'Collect the payout case.', definition.case, 'The casino is quiet. Grab the payout and run.');
-      }
-    } else if (mission.step === 'case') {
-      setObjective(state, `Collect the payout case · ${Math.round(distance(actorPosition, definition.case))} m`, definition.case);
-      if (distance(actorPosition, definition.case) < 52) {
-        mission.payoutDropped = false;
-        mission.hasPayout = true;
-        reportCrime(state, 'missionAct', 0.8);
-        nextStep(state, 'escape', 'Escape to the safehouse.', definition.safehouse);
-      }
-    } else if (mission.step === 'escape') {
-      setObjective(state, `Escape to the safehouse · ${Math.round(distance(actorPosition, definition.safehouse))} m`, definition.safehouse);
-      if (distance(actorPosition, definition.safehouse) < 55) resolveMission(state, definition, hooks);
-    }
-  }
+  const steps = MISSION_STEPS[mission.active];
+  const index = steps?.findIndex((step) => step.id === mission.step) ?? -1;
+  if (index < 0) return;
+
+  const step = steps[index];
+  const target = definition[step.target];
+  const context = { state, dt, input, gap: target ? distance(actorPosition, target) : Infinity };
+  if (step.objective) setObjective(state, step.objective(context), target);
+  if (!step.complete(context)) return;
+
+  step.onComplete?.(context);
+  const next = steps[index + 1];
+  if (next) enterStep(state, definition, next);
+  else resolveMission(state, definition, hooks);
 }
 
+/** Abandon the active attempt and point the player back to its start marker. */
 export function resetMissionAfterFailure(state) {
   if (!state.missions || state.missions.active < 0) return;
   const index = state.missions.active;
@@ -192,13 +245,14 @@ export function resetMissionAfterFailure(state) {
   state.objective = `Mission reset · Return to ${MISSION_DEFINITIONS[index].title}.`;
 }
 
+/** Stage the harbor escape with its screenshot dialogue and objective. */
 export function stageMissionScene(state) {
   if (!state.missions) state.missions = createMissions();
   const mission = state.missions;
   mission.completed = 0;
   mission.active = 0;
   mission.step = 'escape';
-  mission.dialogue = ['The case is yours. Patrols are moving in — lose them before the safehouse.'];
+  mission.dialogue = [HARBOR_ESCAPE_DIALOGUE];
   mission.dialogueTimer = 8;
   mission.banner = '';
   mission.bannerTimer = 0;
